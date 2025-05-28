@@ -1,0 +1,90 @@
+name: Build and Release Binaries
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            arch: amd64
+            output: otakucrawler-windows-amd64.exe
+            use_upx: true
+          - os: macos-latest
+            platform: darwin
+            arch: amd64
+            output: otakucrawler-darwin-amd64
+            use_upx: false
+          - os: macos-latest
+            platform: darwin
+            arch: arm64
+            output: otakucrawler-darwin-arm64
+            use_upx: false
+          - os: ubuntu-22.04
+            platform: linux
+            arch: amd64
+            output: otakucrawler-linux-amd64
+            use_upx: true
+          - os: ubuntu-22.04
+            platform: linux
+            arch: arm64
+            output: otakucrawler-linux-arm64
+            use_upx: true
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go/@v5
+        with:
+          go-version: '1.24'
+
+      - name: Install UPX (Windows)
+        if: matrix.use_upx == true && startsWith(matrix.os, 'windows')
+        run: |
+          choco install upx
+          upx --version
+
+      - name: Install UPX (Linux)
+        if: matrix.use_upx == true && startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y upx-ucl
+          upx --version
+
+      - name: Install UPX (macOS)
+        if: matrix.use_upx == true && startsWith(matrix.os, 'macos')
+        run: |
+          brew install upx
+          upx --version
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.platform }}
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          go build -v -ldflags "-s -w" -o ${{ matrix.output }} .
+
+      - name: Compress binary with UPX
+        if: matrix.use_upx == true
+        run: |
+          upx --best --lzma ${{ matrix.output }}
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        if: github.event_name == 'release' && github.event.action == 'created'
+        with:
+          files: ${{ matrix.output }}
+
+#      - name: Create Installer for Windows
+#        if: startsWith(matrix.os, 'windows')
+#        run: |
+#          echo "Creating Windows installer package"
+#          # for future installer e.g. using NSIS, Inno Setup, etc.

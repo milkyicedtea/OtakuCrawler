@@ -1,0 +1,17 @@
+# Binaries
+otakucrawler
+otakucrawler.exe
+
+# Downloads folder
+OtakuCrawler Downloads/
+
+# IDE files
+.idea/
+.vscode/
+
+# Eventual logs
+*.log
+
+# OS specific
+.DS_Store
+Thumbs.db

@@ -114,7 +114,7 @@ type EpisodeDownload struct {
 	VideoUrl string
 }
 
-func AnmstrnDownload(page playwright.Page, browser playwright.Browser, episodeRange string, specificEpisodes string) {
+func AnmstrnDownload(page playwright.Page, browser playwright.Browser, episodeRange string, specificEpisodes string, config DownloadConfig) {
 	episodeButtons, err := page.Locator(".bottone-ep").All()
 	if err != nil || len(episodeButtons) == 0 {
 		log.Fatalf("could not get entries: %v", err)
@@ -179,7 +179,17 @@ func AnmstrnDownload(page playwright.Page, browser playwright.Browser, episodeRa
 
 	fmt.Printf("Will download %d episodes\n", len(episodesToProcess))
 
-	const batchSize = 3
+	batchSize := config.BatchSize
+	var speedPerDownload float64
+
+	if config.MaxSpeedMbps > 0 {
+		speedPerDownload = config.MaxSpeedMbps / float64(batchSize)
+		fmt.Printf("Using batch size: %d, Speed limit: %.1f Mbps total (%.1f Mbps per download)\n",
+			batchSize, config.MaxSpeedMbps, speedPerDownload)
+	} else {
+		speedPerDownload = 0 // No limit
+		fmt.Printf("Using batch size: %d, Speed limit: No limit\n", batchSize)
+	}
 
 	// Process episodes in batches
 	for batchStart := 0; batchStart < len(episodesToProcess); batchStart += batchSize {
@@ -290,8 +300,14 @@ func AnmstrnDownload(page playwright.Page, browser playwright.Browser, episodeRa
 			go func(dl EpisodeDownload) {
 				defer wg.Done()
 
-				fmt.Printf("Starting download for episode %d\n", dl.Index+1)
-				err := downloadVideo(dl.VideoUrl)
+				if speedPerDownload > 0 {
+					fmt.Printf("Starting download for episode %d (max speed: %.1f Mbps)\n",
+						dl.Index+1, speedPerDownload)
+				} else {
+					fmt.Printf("Starting download for episode %d (no speed limit)\n", dl.Index+1)
+				}
+
+				err := downloadVideo(dl.VideoUrl, speedPerDownload)
 				if err != nil {
 					log.Printf("Download failed for episode %d: %v", dl.Index+1, err)
 				} else {
@@ -309,7 +325,7 @@ func AnmstrnDownload(page playwright.Page, browser playwright.Browser, episodeRa
 	fmt.Println("All requested episodes processed and downloaded successfully!")
 }
 
-func downloadVideo(videoURL string) error {
+func downloadVideo(videoURL string, maxSpeedMbps float64) error {
 	parsedURL, err := url.Parse(videoURL)
 	if err != nil {
 		return fmt.Errorf("invalid URL: %w", err)
@@ -362,7 +378,11 @@ func downloadVideo(videoURL string) error {
 	}
 
 	// Start downloading the file
-	fmt.Printf("⏬ Downloading %s...\n", filename)
+	if maxSpeedMbps > 0 {
+		fmt.Printf("⏬ Downloading %s (max speed: %.1f Mbps)...\n", filename, maxSpeedMbps)
+	} else {
+		fmt.Printf("⏬ Downloading %s (no speed limit)...\n", filename)
+	}
 
 	outFile, err := os.Create(outputPath)
 	if err != nil {
@@ -397,7 +417,28 @@ func downloadVideo(videoURL string) error {
 	}
 
 	startTime := time.Now()
-	written, err := io.Copy(outFile, resp.Body)
+	var written int64
+
+	// Choose between rate-limited and unlimited download
+	if maxSpeedMbps > 0 {
+		// Rate-limited download
+		maxBytesPerSecond := int(maxSpeedMbps * 1024 * 1024 / 8)         // mbps -> bytes/sec
+		fmt.Printf("Rate limiting to %d bytes/sec\n", maxBytesPerSecond) // Debug output
+
+		rateLimitedReader := NewTokenBucketRateLimitedReader(resp.Body, maxBytesPerSecond)
+		defer func(rateLimitedReader *TokenBucketRateLimitedReader) {
+			err := rateLimitedReader.Close()
+			if err != nil {
+				_ = fmt.Errorf("could not close limited reader: %w", err)
+			}
+		}(rateLimitedReader)
+
+		written, err = io.Copy(outFile, rateLimitedReader)
+	} else {
+		// Unlimited download - direct copy
+		written, err = io.Copy(outFile, resp.Body)
+	}
+
 	if err != nil {
 		return fmt.Errorf("could not write to file: %w", err)
 	}

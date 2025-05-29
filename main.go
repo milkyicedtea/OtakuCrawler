@@ -50,7 +50,13 @@ func main() {
 	linksChannel := make(chan []string)
 	switch setupResult.Action {
 	case Download:
-		scraper.Download(setupResult.Page, setupResult.Browser, setupResult.EpisodeRange, setupResult.SpecificEpisodes)
+		scraper.Download(
+			setupResult.Page,
+			setupResult.Browser,
+			setupResult.EpisodeRange,
+			setupResult.SpecificEpisodes,
+			setupResult.DownloadConfig,
+		)
 	case Search:
 		linksChannel <- scraper.GetLinks(setupResult.Page, setupResult.Browser)
 		time.Sleep(1 * time.Second)

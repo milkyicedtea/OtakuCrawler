@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 )
 
 type Action string
@@ -18,6 +19,11 @@ const (
 	None     Action = "none"
 )
 
+type DownloadConfig struct {
+	BatchSize    int     // number of max concurrent downloads
+	MaxSpeedMbps float64 // maximum speed in Mbps
+}
+
 type SetupResult struct {
 	Playwright       *playwright.Playwright
 	Browser          playwright.Browser
@@ -27,6 +33,7 @@ type SetupResult struct {
 	EpisodeRange     string // Format: "start-end"
 	SpecificEpisodes string // Format: "1,3,5,7"
 	IsHeadless       bool
+	DownloadConfig   DownloadConfig
 }
 
 func printHelp() {
@@ -37,6 +44,8 @@ func printHelp() {
 	fmt.Println("  --search, -s         Get streaming links without downloading")
 	fmt.Println("  --range, -r <X-Y>    Download only episodes X through Y")
 	fmt.Println("  --only, -o <X,Y,Z>   Download only specific episodes X, Y, and Z")
+	fmt.Println("  --batch, -b <N>      Number of concurrent downloads (default: 3)")
+	fmt.Println("  --speed, -sp <N>     Maximum download speed in Mbps (default: 20.0)")
 	fmt.Println("  --headless           Run browser in headless mode (no visible window, recommended)")
 	fmt.Println("  --help, -h           Show this help message")
 }
@@ -47,6 +56,12 @@ func CommonSetup() SetupResult {
 	var episodeRange string
 	var specificEpisodes string
 	var isHeadless = false
+
+	downloadConfig := DownloadConfig{
+		BatchSize:    3,
+		MaxSpeedMbps: 1000.0,
+	}
+
 	args := os.Args[1:]
 
 	if len(args) == 0 {
@@ -90,6 +105,28 @@ func CommonSetup() SetupResult {
 			} else {
 				log.Fatal("Error: --only requires a comma-separated list of episode numbers")
 			}
+		case "--batch", "-b":
+			if i+1 < len(args) {
+				batchSize, err := strconv.Atoi(args[i+1])
+				if err != nil || batchSize < 1 {
+					log.Fatal("Error: --batch requires a positive integer")
+				}
+				downloadConfig.BatchSize = batchSize
+				i++
+			} else {
+				log.Fatal("Error: --batch requires a positive integer argument")
+			}
+		case "--speed", "-sp":
+			if i+1 < len(args) {
+				speed, err := strconv.ParseFloat(args[i+1], 64)
+				if err != nil || speed <= 0 {
+					log.Fatal("Error: --speed requires a positive number")
+				}
+				downloadConfig.MaxSpeedMbps = speed
+				i++
+			} else {
+				log.Fatal("Error: --speed requires a positive number argument")
+			}
 		case "--headless":
 			isHeadless = true
 		default:
@@ -111,6 +148,10 @@ func CommonSetup() SetupResult {
 	}
 
 	fmt.Printf("Action: %s, URL: %s\n", action, link)
+	if action == Download {
+		fmt.Printf("Download Config: Batch Size: %d, Max Speed: %.1f Mbps\n",
+			downloadConfig.BatchSize, downloadConfig.MaxSpeedMbps)
+	}
 
 	if action == None {
 		os.Exit(0)
@@ -149,6 +190,7 @@ func CommonSetup() SetupResult {
 		EpisodeRange:     episodeRange,
 		SpecificEpisodes: specificEpisodes,
 		IsHeadless:       isHeadless,
+		DownloadConfig:   downloadConfig,
 	}
 }
 

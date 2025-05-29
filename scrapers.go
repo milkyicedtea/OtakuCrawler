@@ -8,7 +8,7 @@ import (
 
 type Scraper interface {
 	GetLinks(page playwright.Page, browser playwright.Browser) []string
-	Download(page playwright.Page, browser playwright.Browser, episodeRange string, specificEpisodes string)
+	Download(page playwright.Page, browser playwright.Browser, episodeRange string, specificEpisodes string, config DownloadConfig)
 }
 
 func GetScraper(link string) Scraper {
@@ -32,6 +32,6 @@ func (s *AnimeSaturnScraper) GetLinks(page playwright.Page, browser playwright.B
 	return AnmstrnSearch(page, browser)
 }
 
-func (s *AnimeSaturnScraper) Download(page playwright.Page, browser playwright.Browser, episodeRange string, specificEpisodes string) {
-	AnmstrnDownload(page, browser, episodeRange, specificEpisodes)
+func (s *AnimeSaturnScraper) Download(page playwright.Page, browser playwright.Browser, episodeRange string, specificEpisodes string, config DownloadConfig) {
+	AnmstrnDownload(page, browser, episodeRange, specificEpisodes, config)
 }

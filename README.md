@@ -8,8 +8,8 @@
 A powerful tool for batch downloading anime episodes from supported websites.
 
 ## Features
-
-- Batch processing of episodes
+- Batch processing with configurable concurrent downloads
+- Speed limiting to control bandwidth usage
 - Select specific episodes or ranges
 - Headless mode for server environments
 - Automatic file existence detection
@@ -42,6 +42,8 @@ go build
 ```
 
 ## Usage
+
+### Basic Commands
 ```bash
 # Download all episodes from an anime
 ./otakucrawler --link https://examplesite.com/anime/example --download
@@ -58,6 +60,59 @@ go build
 # Get just the streaming links without downloading (if you have an external downloader)
 ./otakucrawler --link https://examplesite.com/anime/example --search
 ```
+
+### Advanced Download Control
+```bash
+# Control concurrent downloads (default: 3)
+./otakucrawler --link https://examplesite.com/anime --download --batch 4
+
+# Limit download speed (in Mbps, default: 0 = no limit)
+./otakucrawler --link https://examplesite.com/anime --download --speed 10
+
+# Combine batch size and speed limiting
+./otakucrawler --link https://examplesite.com/anime --download --batch 2 --speed 20
+
+# Download episodes 1-5 with 4 concurrent downloads at 15 Mbps max
+./otakucrawler --link https://examplesite.com/anime --download --range 1-5 --batch 4 --speed 15
+```
+
+### Command Line Options
+| Option       | Short | Description                                   | Default      |
+|--------------|-------|-----------------------------------------------|--------------|
+| `--link`     | `-l`  | Target URL to scrape                          | Required     |
+| `--download` | `-d`  | Download episodes from the URL                |              |
+| `--search`   | `-s`  | Get streaming links without downloading       |              |
+| `--range`    | `-r`  | Download episodes X through Y (format: X-Y)   | All episodes |
+| `--only`     | `-o`  | Download specific episodes (format: X,Y,Z)    | All episodes |
+| `--batch`    | `-b`  | Number of concurrent downloads                | 3            |
+| `--speed`    | `-sp` | Maximum download speed in Mbps (0 = no limit) | 0            |
+| `--headless` |       | Run browser in headless mode                  | false        |
+| `--help`     | `-h`  | Show help message                             |              |
+
+### Examples
+> [!Note]
+> These examples all include `--headless` because although not the default option,
+> i think it's the best way to use this tool.
+> All of these will obviously still work even without it.
+```bash
+# Conservative setup: 2 concurrent downloads at 5 Mbps each (10 Mbps total)
+./otakucrawler -l https://examplesite.com/anime/example -d -b 2 -sp 10 --headless
+
+# Aggressive setup: 6 concurrent downloads with no speed limit
+./otakucrawler -l https://examplesite.com/anime/example -d -b 6 -sp 0 --headless
+
+# Download specific episodes with moderate settings
+./otakucrawler -l https://examplesite.com/anime/example -d --only 1,5,10,15 -b 3 -sp 25 --headless
+
+# Download latest 5 episodes quickly
+./otakucrawler -l https://examplesite.com/anime/example -d --range 20-24 -b 4 --headless
+```
+
+## Performance Notes
+- **Batch Size**: Higher values = faster overall completion but more resource usage
+- **Speed Limiting**: Set based on your internet connection and usage needs
+  - Set to 0 for maximum speed on unlimited connections
+- **Headless Mode**: Recommended for better performance and server environments
 
 ## Supported Sites
 - AnimeSaturn

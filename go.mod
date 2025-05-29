@@ -2,7 +2,10 @@ module OtakuCrawler
 
 go 1.24
 
-require github.com/playwright-community/playwright-go v0.5200.0
+require (
+	github.com/playwright-community/playwright-go v0.5200.0
+	golang.org/x/time v0.11.0
+)
 
 require (
 	github.com/deckarep/golang-set/v2 v2.8.0 // indirect

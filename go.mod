@@ -1,4 +1,4 @@
-module OtakuCrawler
+module otakucrawler
 
 go 1.24
 

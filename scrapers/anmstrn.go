@@ -1,14 +1,11 @@
-package main
+package scrapers
 
 import (
 	"fmt"
 	"github.com/playwright-community/playwright-go"
-	"io"
 	"log"
-	"net/http"
-	"net/url"
-	"os"
-	"path/filepath"
+	"otakucrawler/commons"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -110,11 +107,61 @@ func AnmstrnSearch(page playwright.Page, browser playwright.Browser) []string {
 }
 
 type EpisodeDownload struct {
-	Index    int
-	VideoUrl string
+	Index        int
+	VideoUrl     string
+	IsHLS        bool
+	AnimeName    string
+	LanguageType string
 }
 
-func AnmstrnDownload(page playwright.Page, browser playwright.Browser, episodeRange string, specificEpisodes string, config DownloadConfig) {
+func extractAnimeName(page playwright.Page) (string, string) {
+	selectors := []string{
+		".container.anime-title-mobile-as.mb-3.w-100 b",
+		".container.anime-title-as.mb-3.w-100 b",
+		"div[class*='anime-title'] b", // Fallback - any div containing anime-title
+	}
+
+	var animeName, languageType string
+
+	for _, selector := range selectors {
+		titleElement := page.Locator(selector).First()
+		if titleElement != nil {
+			title, err := titleElement.TextContent()
+			if err == nil && title != "" {
+				title = strings.TrimSpace(title)
+
+				// Extract language type (SUB_ITA or ITA)
+				if strings.Contains(strings.ToUpper(title), "SUB ITA") {
+					languageType = "SUB_ITA"
+					// Remove "Sub ITA" from the title
+					animeName = strings.TrimSpace(regexp.MustCompile(`(?i)\s*sub\s*ita\s*$`).ReplaceAllString(title, ""))
+				} else if strings.Contains(strings.ToUpper(title), "ITA") {
+					languageType = "ITA"
+					// Remove "ITA" from the title
+					animeName = strings.TrimSpace(regexp.MustCompile(`(?i)\s*ita\s*$`).ReplaceAllString(title, ""))
+				} else {
+					// Default to SUB_ITA if we can't determine
+					languageType = "SUB_ITA"
+					animeName = title
+				}
+
+				// Clean the anime name for filename use
+				animeName = cleanFilename(animeName)
+
+				if animeName != "" {
+					fmt.Printf("Extracted anime name: '%s', Language: %s\n", animeName, languageType)
+					return animeName, languageType
+				}
+			}
+		}
+	}
+
+	// Fallback if we couldn't extract the name
+	fmt.Println("Warning: Could not extract anime name from main page, using fallback")
+	return "Unknown_Anime", "SUB_ITA"
+}
+
+func AnmstrnDownload(page playwright.Page, browser playwright.Browser, episodeRange string, specificEpisodes string, config commons.DownloadConfig, ffmpegPath string) {
 	episodeButtons, err := page.Locator(".bottone-ep").All()
 	if err != nil || len(episodeButtons) == 0 {
 		log.Fatalf("could not get entries: %v", err)
@@ -122,6 +169,9 @@ func AnmstrnDownload(page playwright.Page, browser playwright.Browser, episodeRa
 
 	totalEpisodes := len(episodeButtons)
 	fmt.Printf("Total episodes found: %d\n", totalEpisodes)
+
+	// Extract anime name and language type from the main page
+	animeName, languageType := extractAnimeName(page)
 
 	// Parse episode range or specific episodes
 	var start, end = -1, -1
@@ -265,16 +315,38 @@ func AnmstrnDownload(page playwright.Page, browser playwright.Browser, episodeRa
 				}
 			}
 
-			// Extract video URL
-			videoSrc, err := newPage.Locator("video source[type='video/mp4']").GetAttribute("src")
-			if err != nil {
-				log.Printf("could not get video source for episode %d: %v", episodeIdx+1, err)
-				continue
+			// Wait a bit for the player to load
+			time.Sleep(2 * time.Second)
+
+			// Try to extract video URL - first try MP4, then HLS
+			var videoUrl string
+			var isHLS bool
+
+			// Try MP4 first
+			videoSrc, err := newPage.Locator("video source[type='video/mp4']").GetAttribute("src", playwright.LocatorGetAttributeOptions{Timeout: playwright.Float(2000)})
+			if err == nil && videoSrc != "" {
+				videoUrl = videoSrc
+				isHLS = false
+				log.Printf("Episode %d found MP4 source: %s", episodeIdx+1, videoUrl)
+			} else {
+				// Try to extract HLS URL from JavaScript
+				hlsUrl, err := extractHLSUrl(newPage)
+				if err != nil {
+					log.Printf("could not extract video URL for episode %d: %v", episodeIdx+1, err)
+					continue
+				}
+				videoUrl = hlsUrl
+				isHLS = true
+				log.Printf("Episode %d found HLS source: %s", episodeIdx+1, videoUrl)
 			}
 
-			log.Printf("Episode %d video URL: %s", episodeIdx+1, videoSrc)
-
-			batchDownloads = append(batchDownloads, EpisodeDownload{Index: episodeIdx, VideoUrl: videoSrc})
+			batchDownloads = append(batchDownloads, EpisodeDownload{
+				Index:        episodeIdx,
+				VideoUrl:     videoUrl,
+				IsHLS:        isHLS,
+				AnimeName:    animeName,
+				LanguageType: languageType,
+			})
 
 			// Close the page when done with it
 			err = newPage.Close()
@@ -307,7 +379,13 @@ func AnmstrnDownload(page playwright.Page, browser playwright.Browser, episodeRa
 					fmt.Printf("Starting download for episode %d (no speed limit)\n", dl.Index+1)
 				}
 
-				err := downloadVideo(dl.VideoUrl, speedPerDownload)
+				var err error
+				if dl.IsHLS {
+					err = downloadHLSVideo(dl.VideoUrl, dl.AnimeName, dl.LanguageType, dl.Index+1, ffmpegPath, speedPerDownload)
+				} else {
+					err = downloadVideo(dl.VideoUrl, speedPerDownload)
+				}
+
 				if err != nil {
 					log.Printf("Download failed for episode %d: %v", dl.Index+1, err)
 				} else {
@@ -323,130 +401,4 @@ func AnmstrnDownload(page playwright.Page, browser playwright.Browser, episodeRa
 	}
 
 	fmt.Println("All requested episodes processed and downloaded successfully!")
-}
-
-func downloadVideo(videoURL string, maxSpeedMbps float64) error {
-	parsedURL, err := url.Parse(videoURL)
-	if err != nil {
-		return fmt.Errorf("invalid URL: %w", err)
-	}
-
-	pathSegments := strings.Split(parsedURL.Path, "/")
-	if len(pathSegments) < 2 {
-		return fmt.Errorf("URL path too short to determine folder/filename")
-	}
-
-	filename := pathSegments[len(pathSegments)-1]
-	subfolder := pathSegments[len(pathSegments)-2]
-
-	outputDir := filepath.Join("OtakuCrawler Downloads", subfolder)
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		return fmt.Errorf("could not create output directory: %w", err)
-	}
-
-	outputPath := filepath.Join(outputDir, filename)
-
-	// Check if file already exists
-	if fileInfo, err := os.Stat(outputPath); err == nil {
-		// File exists, check its size
-		existingSize := fileInfo.Size()
-
-		// Make a HEAD request to get the expected file size
-		resp, err := http.Head(videoURL)
-		if err != nil {
-			// If we can't determine the size, just download again to be safe
-			fmt.Printf("⚠️ Could not check file size for %s, downloading again\n", filename)
-		} else {
-			defer func(Body io.ReadCloser) {
-				err := Body.Close()
-				if err != nil {
-					_ = fmt.Errorf("could not close response body: %w", err)
-				}
-			}(resp.Body)
-
-			expectedSize := resp.ContentLength
-			if expectedSize > 0 && existingSize >= expectedSize {
-				// File is complete, no need to download again
-				fmt.Printf("✅ File already exists with correct size: %s (%.2f MB)\n",
-					outputPath, float64(existingSize)/(1024*1024))
-				return nil
-			}
-		}
-
-		// File exists but is incomplete/different, will be overwritten
-		fmt.Printf("⚠️ File exists but appears incomplete: %s, downloading again\n", filename)
-	}
-
-	// Start downloading the file
-	if maxSpeedMbps > 0 {
-		fmt.Printf("⏬ Downloading %s (max speed: %.1f Mbps)...\n", filename, maxSpeedMbps)
-	} else {
-		fmt.Printf("⏬ Downloading %s (no speed limit)...\n", filename)
-	}
-
-	outFile, err := os.Create(outputPath)
-	if err != nil {
-		return fmt.Errorf("could not create output file: %w", err)
-	}
-	defer func(outFile *os.File) {
-		err := outFile.Close()
-		if err != nil {
-			_ = fmt.Errorf("could not close output file: %w", err)
-		}
-	}(outFile)
-
-	resp, err := http.Get(videoURL)
-	if err != nil {
-		return fmt.Errorf("HTTP error: %w", err)
-	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			_ = fmt.Errorf("could not close response body: %w", err)
-		}
-	}(resp.Body)
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("bad status: %s", resp.Status)
-	}
-
-	// Add a simple progress indicator
-	contentLength := resp.ContentLength
-	if contentLength > 0 {
-		fmt.Printf("Total size: %.2f MB\n", float64(contentLength)/(1024*1024))
-	}
-
-	startTime := time.Now()
-	var written int64
-
-	// Choose between rate-limited and unlimited download
-	if maxSpeedMbps > 0 {
-		// Rate-limited download
-		maxBytesPerSecond := int(maxSpeedMbps * 1024 * 1024 / 8)         // mbps -> bytes/sec
-		fmt.Printf("Rate limiting to %d bytes/sec\n", maxBytesPerSecond) // Debug output
-
-		rateLimitedReader := NewTokenBucketRateLimitedReader(resp.Body, maxBytesPerSecond)
-		defer func(rateLimitedReader *TokenBucketRateLimitedReader) {
-			err := rateLimitedReader.Close()
-			if err != nil {
-				_ = fmt.Errorf("could not close limited reader: %w", err)
-			}
-		}(rateLimitedReader)
-
-		written, err = io.Copy(outFile, rateLimitedReader)
-	} else {
-		// Unlimited download - direct copy
-		written, err = io.Copy(outFile, resp.Body)
-	}
-
-	if err != nil {
-		return fmt.Errorf("could not write to file: %w", err)
-	}
-
-	elapsed := time.Since(startTime).Seconds()
-	speed := float64(written) / elapsed / 1024 / 1024 // MB/s
-
-	fmt.Printf("✅ Downloaded to: %s (%.2f MB at %.2f MB/s)\n",
-		outputPath, float64(written)/(1024*1024), speed)
-	return nil
 }

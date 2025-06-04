@@ -1,14 +1,15 @@
-package main
+package scrapers
 
 import (
 	"github.com/playwright-community/playwright-go"
 	"net/url"
+	"otakucrawler/commons"
 	"strings"
 )
 
 type Scraper interface {
 	GetLinks(page playwright.Page, browser playwright.Browser) []string
-	Download(page playwright.Page, browser playwright.Browser, episodeRange string, specificEpisodes string, config DownloadConfig)
+	Download(page playwright.Page, browser playwright.Browser, episodeRange string, specificEpisodes string, config commons.DownloadConfig, ffmpegPath string)
 }
 
 func GetScraper(link string) Scraper {
@@ -32,6 +33,6 @@ func (s *AnimeSaturnScraper) GetLinks(page playwright.Page, browser playwright.B
 	return AnmstrnSearch(page, browser)
 }
 
-func (s *AnimeSaturnScraper) Download(page playwright.Page, browser playwright.Browser, episodeRange string, specificEpisodes string, config DownloadConfig) {
-	AnmstrnDownload(page, browser, episodeRange, specificEpisodes, config)
+func (s *AnimeSaturnScraper) Download(page playwright.Page, browser playwright.Browser, episodeRange string, specificEpisodes string, config commons.DownloadConfig, ffmpegPath string) {
+	AnmstrnDownload(page, browser, episodeRange, specificEpisodes, config, ffmpegPath)
 }

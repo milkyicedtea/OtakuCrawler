@@ -86,7 +86,7 @@ go build
 | `--only`     | `-o`  | Download specific episodes (format: X,Y,Z)    | All episodes |
 | `--batch`    | `-b`  | Number of concurrent downloads                | 3            |
 | `--speed`    | `-sp` | Maximum download speed in Mbps (0 = no limit) | 0            |
-| `--headless` |       | Run browser in headless mode                  | false        |
+| `--headless` | `-hl` | Run browser in headless mode                  | false        |
 | `--help`     | `-h`  | Show help message                             |              |
 
 ### Examples

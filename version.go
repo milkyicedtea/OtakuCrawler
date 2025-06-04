@@ -5,8 +5,8 @@ import (
 )
 
 var (
-	Version   = "1.0.1"
-	BuildDate = "2025-05-28"
+	Version   = "1.1.0"
+	BuildDate = "2025-06-04"
 )
 
 func printBanner() {

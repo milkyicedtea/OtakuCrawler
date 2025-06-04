@@ -12,7 +12,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 type Action string
@@ -88,12 +87,7 @@ func downloadFFmpeg(appDir, destPath string) error {
 	// Download the archive
 	fmt.Printf("Downloading from: %s\n", url)
 	cmd := exec.Command("curl", "-L", url, "-o", archiveName)
-	if runtime.GOOS == "windows" {
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			HideWindow:    true,
-			CreationFlags: 0x08000000,
-		}
-	}
+	setWindowsCmdAttrs(cmd)
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to download FFmpeg: %w", err)
@@ -106,14 +100,11 @@ func downloadFFmpeg(appDir, destPath string) error {
 		if runtime.GOOS == "windows" {
 			cmd = exec.Command("powershell", "-Command",
 				"Expand-Archive", "-Path", archiveName, "-DestinationPath", appDir, "-Force")
-			cmd.SysProcAttr = &syscall.SysProcAttr{
-				HideWindow:    true,
-				CreationFlags: 0x08000000,
-			}
 		} else {
 			// Use unzip on Mac/Linux
 			cmd = exec.Command("unzip", "-o", archiveName, "-d", appDir)
 		}
+		setWindowsCmdAttrs(cmd)
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("failed to extract FFmpeg archive: %w", err)
 		}
